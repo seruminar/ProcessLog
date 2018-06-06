@@ -178,7 +178,7 @@ namespace ProcessWatcher
             Watchers.Clear();
             WatchedProcesses.Clear();
             Queries.Clear();
-            TotalTime.Reset();
+            TotalTime.Stop();
 
             Update(null, null);
         }
