@@ -84,7 +84,6 @@
     <Compile Include="ProcessWatcher\ProcessWatcher.cs" />
     <Compile Include="ProcessWatcher\ProcessWatcherEventArgs.cs" />
     <Compile Include="ProcessWatcher\ProcessWatcherFactory.cs" />
-    <Compile Include="ProcessWatcher\ProcessWatcherLogEntry.cs" />
     <Compile Include="ProcessWatcher\SuperStopwatch.cs" />
     <Compile Include="Properties\AssemblyInfo.cs">
       <SubType>Code</SubType>

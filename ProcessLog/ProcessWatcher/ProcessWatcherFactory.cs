@@ -8,7 +8,7 @@ namespace ProcessWatcher
 {
     public class ProcessWatcherFactory
     {
-        private const string timeFormat = "hh' 'mm' 'ss";
+        private const string timeFormat = "hh':'mm':'ss";
 
         private string saveSuffix;
 
