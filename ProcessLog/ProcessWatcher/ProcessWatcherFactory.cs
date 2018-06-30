@@ -15,17 +15,14 @@ namespace ProcessWatcher
         private Timer update;
 
         private Stopwatch TotalTime = new Stopwatch();
+
         private HashSet<ProcessWatcher> Watchers = new HashSet<ProcessWatcher>();
-        private Dictionary<string, SuperStopwatch> WatchedProcesses = new Dictionary<string, SuperStopwatch>();
+
+        private Dictionary<Tuple<string, int>, SuperStopwatch> WatchedProcesses = new Dictionary<Tuple<string, int>, SuperStopwatch>();
+
         private Dictionary<string, TimeSpan> Durations = new Dictionary<string, TimeSpan>();
 
-        public static ProcessWatcherFactory Instance { get; } = new ProcessWatcherFactory();
-
-        public HashSet<string> Queries = new HashSet<string>();
-
         private HashSet<string> Log = new HashSet<string>();
-
-        public event EventHandler<ProcessWatcherEventArgs> EntryLogged;
 
         private TimeSpan Interval {
             get
@@ -40,6 +37,9 @@ namespace ProcessWatcher
             }
         }
 
+        /// <summary>
+        /// Suffix used when saving log file.
+        /// </summary>
         public string SaveSuffix
         {
             get
@@ -57,29 +57,25 @@ namespace ProcessWatcher
             }
         }
 
+        /// <summary>
+        /// Get a static instance of the factory.
+        /// </summary>
+        public static ProcessWatcherFactory Instance { get; } = new ProcessWatcherFactory();
 
-        public ProcessWatcher New(string name)
-        {
-            if (update == null)
-            {
-                update = new Timer(Interval.TotalMilliseconds);
-                update.Elapsed += Update;
-                update.Enabled = true;
-            }
+        /// <summary>
+        /// HashSet of queries.
+        /// </summary>
+        public HashSet<string> Queries = new HashSet<string>();
 
-            if (Queries.Add(name))
-            {
-                ProcessWatcher pw = new ProcessWatcher(name);
-                Watchers.Add(pw);
-                return pw;
-            }
-
-            return null;
-        }
+        /// <summary>
+        /// Event fired when new log entry comes in from a watcher.
+        /// </summary>
+        public event EventHandler<ProcessWatcherEventArgs> EntryLogged;
 
         private void Update(object sender, ElapsedEventArgs e)
         {
-            Watchers.ToList().ForEach(w => w.Update());
+            var allProcesses = Process.GetProcesses();
+            Watchers.ToList().ForEach(w => w.Update(allProcesses));
 
             var tempDurations = new Dictionary<string, TimeSpan>(Durations);
 
@@ -88,7 +84,7 @@ namespace ProcessWatcher
 
             foreach (var proc in WatchedProcesses)
             {
-                string name = proc.Key.Substring(0, proc.Key.IndexOf('|'));
+                string name = proc.Key.Item1;
 
                 if (tempDurations.ContainsKey(name) && !tempUpdatedTempDurations.Contains(name))
                 {
@@ -110,7 +106,7 @@ namespace ProcessWatcher
 
             foreach (var duration in tempDurations.OrderByDescending(d => d.Value))
             {
-                durationsList.Add(new Tuple<bool, string>(WatchedProcesses.Any(p => p.Key.StartsWith(duration.Key)),
+                durationsList.Add(new Tuple<bool, string>(WatchedProcesses.Any(p => p.Key.Item1.StartsWith(duration.Key)),
                                                  $"{duration.Value.ToString(timeFormat)}|{duration.Key}"));
             }
 
@@ -128,13 +124,13 @@ namespace ProcessWatcher
             Log.Clear();
         }
 
-        internal void LogStartEvent(string key)
+        internal void LogStartEvent(Tuple<Tuple<string, int>, double> keyCPU)
         {
-            if (!WatchedProcesses.ContainsKey(key))
+            if (!WatchedProcesses.ContainsKey(keyCPU.Item1))
             {
-                string name = key.Substring(0, key.IndexOf('|'));
+                string name = keyCPU.Item1.Item1;
 
-                WatchedProcesses[key] = SuperStopwatch.StartNew();
+                WatchedProcesses[keyCPU.Item1] = SuperStopwatch.StartNew();
 
                 if (!Durations.ContainsKey(name))
                 {
@@ -143,17 +139,17 @@ namespace ProcessWatcher
             }
         }
 
-        internal void LogEndEvent(string key)
+        internal void LogEndEvent(Tuple<Tuple<string, int>, double> keyCPU)
         {
-            if (WatchedProcesses.TryGetValue(key, out SuperStopwatch timer))
+            if (WatchedProcesses.TryGetValue(keyCPU.Item1, out SuperStopwatch timer))
             {
                  var tempUpdatedDurations = new HashSet<string>();
 
                 timer.Stop();
 
-                WatchedProcesses.Remove(key);
+                WatchedProcesses.Remove(keyCPU.Item1);
 
-                string name = key.Substring(0, key.IndexOf('|'));
+                string name = keyCPU.Item1.Item1;
 
                 if (!tempUpdatedDurations.Contains(name))
                 {
@@ -161,7 +157,7 @@ namespace ProcessWatcher
                     tempUpdatedDurations.Add(name);
                 }
 
-                Log.Add($"{timer.StartTime.ToString(timeFormat)}|{timer.StopTime.ToString(timeFormat)}|{timer.Elapsed.ToString(timeFormat)}|{name}{Environment.NewLine}");
+                Log.Add($"{timer.StartTime.ToString(timeFormat)}|{timer.StopTime.ToString(timeFormat)}|{timer.Elapsed.ToString(timeFormat)}|{keyCPU.Item2:P2}|{name}{Environment.NewLine}");
 
                 tempUpdatedDurations.Clear();
             }
@@ -170,6 +166,30 @@ namespace ProcessWatcher
         internal void SaveQueries()
         {
             SaveSuffix = String.Join("_", Queries);
+        }
+
+        /// <summary>
+        /// Create new watcher with the given name and start watching if it is the first watcher.
+        /// </summary>
+        /// <param name="name">Name of watcher.</param>
+        /// <returns>Watcher</returns>
+        public ProcessWatcher New(string name)
+        {
+            if (update == null)
+            {
+                update = new Timer(Interval.TotalMilliseconds);
+                update.Elapsed += Update;
+                update.Enabled = true;
+            }
+
+            if (Queries.Add(name))
+            {
+                ProcessWatcher pw = new ProcessWatcher(name);
+                Watchers.Add(pw);
+                return pw;
+            }
+
+            return null;
         }
 
         public void DestroyAllWatchers()

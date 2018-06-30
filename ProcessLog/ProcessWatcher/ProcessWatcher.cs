@@ -7,57 +7,93 @@ namespace ProcessWatcher
 {
     public class ProcessWatcher
     {
-        private HashSet<string> logged = new HashSet<string>();
+        private HashSet<Tuple<string, int>> loggedProcesses = new HashSet<Tuple<string, int>>();
 
-        internal ProcessWatcherFactory Factory = ProcessWatcherFactory.Instance;
-        private IEnumerable<string> initial;
+        private ProcessWatcherFactory Factory = ProcessWatcherFactory.Instance;
 
-        public string Name { get; }
+        private List<Tuple<Tuple<string, int>, double>> initialProcesses;
 
-        public ProcessWatcher(string name)
+        private string Name { get; }
+
+        private class KeyPercentTupleComparer : IEqualityComparer<Tuple<Tuple<string, int>, double>>
         {
-            initial = Process.GetProcesses().Select(c => $"{c.ProcessName}|{c.Id.ToString()}");
+            public bool Equals(Tuple<Tuple<string, int>, double> x, Tuple<Tuple<string, int>, double> y)
+            {
+                if (ReferenceEquals(x, y)) return true;
+
+                return x.Item1.Item1 + x.Item1.Item2 == y.Item1.Item1 + y.Item1.Item2;
+            }
+
+            public int GetHashCode(Tuple<Tuple<string, int>, double> obj)
+            {
+                return obj.Item1.GetHashCode();
+            }
+        }
+
+        private List<Tuple<Tuple<string, int>, double>> GetProcessesAsKeyPercentTuples(Process[] processes, DateTime stamp)
+        {
+            var tuplesList = new List<Tuple<Tuple<string, int>, double>>();
+
+            foreach (var process in processes)
+            {
+                if (process.Id > 0 && (Name == "%" || Name != "%" && process.ProcessName.IndexOf(Name, StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    tuplesList.Add(Tuple.Create(Tuple.Create(process.ProcessName, process.Id), process.TotalProcessorTime.TotalMilliseconds / (stamp - process.StartTime).TotalMilliseconds / Environment.ProcessorCount));
+                }
+            }
+
+            return tuplesList;
+        }
+
+        /// <summary>
+        /// Create a new ProcessWatcher with the given name.
+        /// </summary>
+        /// <param name="name"></param>
+        internal ProcessWatcher(string name)
+        {
             Name = name;
+            initialProcesses = GetProcessesAsKeyPercentTuples(Process.GetProcesses(), DateTime.Now);
         }
 
-        public void Update()
+        /// <summary>
+        /// Update watched processes. Added processes fire LogStartEvent of the factory. Removed processes fire LogEndEvent of the factory.
+        /// </summary>
+        /// <param name="allProcesses"></param>
+        internal void Update(Process[] allProcesses)
         {
-            var current = Process.GetProcesses().Select(c => $"{c.ProcessName}|{c.Id.ToString()}");
+            var currentProcesses = GetProcessesAsKeyPercentTuples(allProcesses, DateTime.Now);
+            
+            var addedProcesses = currentProcesses.Except(initialProcesses, new KeyPercentTupleComparer());
+            var removedProcesses = initialProcesses.Except(currentProcesses, new KeyPercentTupleComparer());
 
-            var added = current.Except(initial);
-            var removed = initial.Except(current);
+            initialProcesses = currentProcesses;
 
-            initial = current;
-
-            if (Name != "%")
+            foreach (var process in addedProcesses)
             {
-                added = added.Where(a => a.IndexOf(Name, StringComparison.OrdinalIgnoreCase) >= 0);
-                removed = removed.Where(r => r.IndexOf(Name, StringComparison.OrdinalIgnoreCase) >= 0);
-            }
-
-            foreach (var proc in added)
-            {
-                if (!logged.Contains(proc))
+                if (!loggedProcesses.Contains(process.Item1))
                 {
-                    logged.Add(proc);
-                    Factory.LogStartEvent(proc);
+                    loggedProcesses.Add(process.Item1);
+                    Factory.LogStartEvent(process);
                 }
             }
 
-            foreach (var proc in removed)
+            foreach (var process in removedProcesses)
             {
-                if (logged.Contains(proc))
+                if (loggedProcesses.Contains(process.Item1))
                 {
-                    logged.Remove(proc);
-                    Factory.LogEndEvent(proc);
+                    loggedProcesses.Remove(process.Item1);
+                    Factory.LogEndEvent(process);
                 }
             }
 
         }
 
+        /// <summary>
+        /// Destory ProcessWatcher cleanup. May be unnecessary.
+        /// </summary>
         internal void Destroy()
         {
-            logged.Clear();
+            loggedProcesses.Clear();
         }
     }
 }
